@@ -41,7 +41,7 @@ function App() {
   return <div className="app-shell">
     <aside className="sidebar">
       <Link href="/" className="flex items-center gap-3 px-3 mb-12 no-underline text-inherit" data-testid="link-brand">
-        <span className="brand-mark"><Leaf size={19}/></span><span><b className="serif text-[19px] tracking-tight">Kindred</b><small className="block text-[9px] tracking-[.18em] text-[#b5c8ba] uppercase">wellness, your way</small></span>
+        <span className="brand-mark"><Leaf size={19}/></span><span><b className="serif text-[19px] tracking-tight">Aarogya</b><small className="block text-[9px] tracking-[.18em] text-[#b5c8ba] uppercase">wellness, your way</small></span>
       </Link>
       <p className="eyebrow text-[#a8bbae] px-3 mb-3">Your space</p>
       <nav className="flex flex-col gap-1">{navItems.map(({href,label,icon:Icon})=><Link href={href} key={href} className={`nav-link ${path===href?'active':''}`} data-testid={`link-nav-${label.toLowerCase()}`}><Icon size={17}/>{label}</Link>)}</nav>
@@ -199,7 +199,7 @@ function SettingsPage({data,setData,updateProfile}:{data:Store;setData:React.Dis
   const p=data.profile;const [message,setMessage]=useState('');
   const ready=Number(p.age)>=18&&Number(p.age)<=120&&Number(p.height)>0&&Number(p.weight)>0&&Boolean(p.calculation);
   const estimate=useMemo(()=>{if(!ready)return null;const age=Number(p.age),kg=Number(p.weight),cm=Number(p.height);return Math.round(p.calculation==='female'?10*kg+6.25*cm-5*age-161:10*kg+6.25*cm-5*age+5);},[ready,p.age,p.height,p.weight,p.calculation]);
-  const exportData=()=>{const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='kindred-wellness-data.json';a.click();URL.revokeObjectURL(url);setMessage('Your data file has been prepared.');};
+  const exportData=()=>{const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='aarogya-wellness-data.json';a.click();URL.revokeObjectURL(url);setMessage('Your data file has been prepared.');};
   const clearData=()=>{if(window.confirm('Clear all information saved in this browser? This cannot be undone.')){localStorage.removeItem(KEY);setData(blank);setMessage('Your local data has been cleared.');}};
   const update=(key:keyof Profile,value:string|boolean)=>updateProfile({[key]:value} as Partial<Profile>);
   return <div className="page-wrap"><PageTitle eyebrow="Your space, your choices" title="Settings & privacy." subtitle="This tracker is personal by design. Keep only the details that help you."/>
@@ -222,7 +222,7 @@ function SettingsPage({data,setData,updateProfile}:{data:Store;setData:React.Dis
         <Panel className="panel-pad"><p className="eyebrow mb-1">Privacy & control</p><h2 className="serif text-2xl m-0 text-[#355748]">Your browser, your data.</h2><div className="flex gap-3 mt-4 p-3 rounded-xl bg-[#f1f2eb]"><LockKeyhole size={17} className="text-[#56745f] shrink-0 mt-0.5"/><p className="small-copy m-0 text-[#5e7365]">Entries are stored only in this browser’s local storage. Clearing browser data will remove them. No server, account, AI analysis, or external sharing is used.</p></div><div className="mt-4 space-y-2 text-xs text-[#66786c]"><p className="flex gap-2 m-0"><Check size={14} className="text-[#63866d]"/> Data export is available as a JSON file.</p><p className="flex gap-2 m-0"><Check size={14} className="text-[#63866d]"/> Web-only reminders and device syncing are not enabled in this release.</p><p className="flex gap-2 m-0"><Check size={14} className="text-[#63866d]"/> No photo analysis, barcode scanning, or social sharing is enabled.</p></div><div className="flex flex-wrap gap-2 mt-5"><button className="btn btn-soft" onClick={exportData} data-testid="button-export-data"><Download size={15}/> Export my data</button><button className="btn btn-danger" onClick={clearData} data-testid="button-clear-data"><Trash2 size={15}/> Clear all data</button></div>{message&&<p role="status" className="text-xs text-[#56745f] mt-3" data-testid="status-settings">{message}</p>}</Panel>
       </div>
     </div>
-    <p className="small-copy text-center mt-7">Kindred is a personal reflection tool, not medical care.</p>
+    <p className="small-copy text-center mt-7">Aarogya is a personal reflection tool, not medical care.</p>
   </div>;
 }
 function Field({label,value,type='text',min,max,onChange,test,suffix}:{label:string;value:string;type?:string;min?:string;max?:string;onChange:(v:string)=>void;test:string;suffix?:string}) {return <div><label className="label" htmlFor={test}>{label} {suffix&&<span className="font-normal">({suffix})</span>}</label><input id={test} className="field" type={type} min={min} max={max} value={value} onChange={e=>onChange(e.target.value)} data-testid={`input-${test}`}/></div>}

@@ -1,6 +1,6 @@
 kind = "web"
 previewPath = "/"
-title = "Holistic Health Tracker"
+title = "Aarogya"
 description = "A personal wellness web app for setting flexible health goals, logging meals and hydration, tracking mood and recovery, and reviewing private progress insights."
 version = "1.0.0"
 id = "artifacts/holistic-health-tracker"
