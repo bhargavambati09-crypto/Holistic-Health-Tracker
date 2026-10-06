@@ -1,0 +1,2 @@
+- [Clerk React peer versions](clerk-react-peers.md) — keep the app's React patch version within Clerk's declared peer range to avoid runtime hook errors.
+- [Generated browser client types](generated-browser-client-types.md) — generated fetch code using `Headers.entries()` requires the DOM iterable TypeScript library.

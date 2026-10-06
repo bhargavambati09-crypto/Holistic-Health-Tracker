@@ -1,10 +1,18 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Link, Route, Switch, useLocation } from 'wouter';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ClerkProvider, SignIn, SignUp, useAuth, useClerk, useUser } from '@clerk/react';
+import { publishableKeyFromHost } from '@clerk/react/internal';
+import { shadcn } from '@clerk/themes';
+import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
+import { Link, Redirect, Route, Router as WouterRouter, Switch, useLocation } from 'wouter';
 import {
   Activity, ArrowRight, BarChart3, Check, ChevronRight, CircleHelp, Clock3, Droplets,
-  Download, Heart, Leaf, LockKeyhole, Plus, Settings2, ShieldCheck, Sparkles, Trash2,
+  Download, Heart, Leaf, LockKeyhole, LogOut, Plus, Settings2, ShieldCheck, Sparkles, Trash2,
   Utensils, Waves, Wind, X
 } from 'lucide-react';
+import {
+  getGetWellnessSnapshotQueryKey, useDeleteWellnessSnapshot,
+  useGetWellnessSnapshot, useSaveWellnessSnapshot
+} from '@workspace/api-client-react';
 import NotFound from '@/pages/not-found';
 
 type Profile = {
@@ -17,7 +25,12 @@ type Goal = { id: string; title: string; kind: string; target: number; unit: str
 type Store = { profile: Profile; meals: Meal[]; water: { id:string; ml:number; time:string }[]; checkins: Checkin[]; meds: {id:string;label:string;status:string;time:string}[]; biometrics: {id:string;kind:string;value:string;unit:string;time:string}[]; goals: Goal[]; completed: Record<string, number> };
 const KEY = 'holistic-health-tracker-v1';
 const blank: Store = { profile:{ age:'',height:'',weight:'',gender:'',calculation:'',chronotype:'',objective:'',conditions:'',cycle:false,estimateConfirmed:false }, meals:[],water:[],checkins:[],meds:[],biometrics:[],goals:[],completed:{} };
-const readStore = ():Store => { try { const val=localStorage.getItem(KEY); return val ? {...blank,...JSON.parse(val),profile:{...blank.profile,...JSON.parse(val).profile}} : blank; } catch { return blank; } };
+const parseStore = (value:unknown):Store => {
+  if (!value || typeof value !== 'object') return blank;
+  const saved=value as Partial<Store>;
+  return {...blank,...saved,profile:{...blank.profile,...saved.profile}};
+};
+const readLegacyStore = ():Store|null => { try { const val=localStorage.getItem(KEY); return val ? parseStore(JSON.parse(val)) : null; } catch { return null; } };
 const localDateKey = (date:Date) => `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
 const today = () => localDateKey(new Date());
 const nowTime = () => new Date().toTimeString().slice(0,5);
@@ -25,49 +38,111 @@ const id = () => Math.random().toString(36).slice(2,9);
 const weekday = new Intl.DateTimeFormat('en',{weekday:'long'});
 const dateLabel = new Intl.DateTimeFormat('en',{month:'long',day:'numeric',year:'numeric'});
 const navItems = [
-  {href:'/',label:'Today',icon:Leaf}, {href:'/nutrition',label:'Nutrition',icon:Utensils},
+  {href:'/dashboard',label:'Today',icon:Leaf}, {href:'/nutrition',label:'Nutrition',icon:Utensils},
   {href:'/wellbeing',label:'Wellbeing',icon:Heart}, {href:'/insights',label:'Insights',icon:BarChart3},
   {href:'/settings',label:'Settings',icon:Settings2}
 ];
-function useTracker() {
-  const [data,setData]=useState<Store>(readStore);
-  useEffect(()=>{localStorage.setItem(KEY,JSON.stringify(data));},[data]);
-  return [data,setData] as const;
+const basePath=import.meta.env.BASE_URL.replace(/\/$/,'');
+const clerkPubKey=publishableKeyFromHost(window.location.hostname,import.meta.env.VITE_CLERK_PUBLISHABLE_KEY);
+const clerkProxyUrl=import.meta.env.VITE_CLERK_PROXY_URL;
+const queryClient=new QueryClient();
+function stripBase(path:string){return basePath&&path.startsWith(basePath)?path.slice(basePath.length)||'/':path;}
+const appearance={
+  theme:shadcn,cssLayerName:'clerk',
+  options:{logoPlacement:'inside' as const,logoLinkUrl:basePath||'/',logoImageUrl:`${window.location.origin}${basePath}/logo.svg`},
+  variables:{colorPrimary:'#315d4d',colorForeground:'#29463d',colorMutedForeground:'#6c8174',colorDanger:'#96493e',colorBackground:'#fffefa',colorInput:'#fffefa',colorInputForeground:'#29463d',colorNeutral:'#d9ded2',fontFamily:'DM Sans, sans-serif',borderRadius:'1rem'},
+  elements:{
+    rootBox:'auth-root w-full flex justify-center',cardBox:'auth-cardBox bg-[#fffefa] rounded-2xl w-[440px] max-w-full overflow-hidden shadow-xl',
+    card:'!shadow-none !border-0 !bg-transparent !rounded-none',footer:'!shadow-none !border-0 !bg-transparent !rounded-none',
+    headerTitle:'text-[#29463d] font-serif',headerSubtitle:'text-[#6c8174]',socialButtonsBlockButtonText:'text-[#29463d]',
+    formFieldLabel:'text-[#526d60]',footerActionLink:'text-[#315d4d]',footerActionText:'text-[#6c8174]',dividerText:'text-[#74867a]',
+    identityPreviewEditButton:'text-[#315d4d]',formFieldSuccessText:'text-[#315d4d]',alertText:'text-[#96493e]',
+    logoBox:'mx-auto',logoImage:'max-h-10',socialButtonsBlockButton:'border-[#d9ded2] bg-[#fffefa]',
+    formButtonPrimary:'bg-[#315d4d] hover:bg-[#244a3c] text-white',formFieldInput:'border-[#d9ded2] bg-[#fffefa] text-[#29463d]',
+    footerAction:'text-[#6c8174]',dividerLine:'bg-[#e5e8df]',alert:'bg-[#f4e4df]',otpCodeFieldInput:'border-[#d9ded2] bg-[#fffefa] text-[#29463d]',
+    formFieldRow:'text-[#526d60]',main:'text-[#29463d]',
+  },
+};
+function App(){
+  return <WouterRouter base={basePath}><AuthRoutes/></WouterRouter>;
 }
-function App() {
-  const [data,setData]=useTracker();
+function AuthRoutes(){
+  const [,setLocation]=useLocation();
+  if(!clerkPubKey) throw new Error('Missing VITE_CLERK_PUBLISHABLE_KEY in .env file');
+  return <ClerkProvider publishableKey={clerkPubKey} proxyUrl={clerkProxyUrl} appearance={appearance}
+    signInUrl={`${basePath}/sign-in`} signUpUrl={`${basePath}/sign-up`}
+    localization={{signIn:{start:{title:'Welcome back',subtitle:'Your wellness space is ready when you are.'}},signUp:{start:{title:'Make room for yourself',subtitle:'Create a private Aarogya account.'}}}}
+    routerPush={to=>setLocation(stripBase(to))} routerReplace={to=>setLocation(stripBase(to),{replace:true})}>
+    <QueryClientProvider client={queryClient}><ClerkCacheSync/><Switch>
+      <Route path="/sign-in/*?"><AuthPage mode="sign-in"/></Route>
+      <Route path="/sign-up/*?"><AuthPage mode="sign-up"/></Route>
+      <Route path="/"><HomeRoute/></Route>
+      <Route><ProtectedTracker/></Route>
+      <Route component={NotFound}/>
+    </Switch></QueryClientProvider>
+  </ClerkProvider>;
+}
+function AuthPage({mode}:{mode:'sign-in'|'sign-up'}){
+  const common='flex min-h-[100dvh] items-center justify-center bg-[#f6f4eb] px-4 py-10';
+  return <div className={`${common} auth-page`}><div className="auth-frame"><Link href="/" className="auth-brand" data-testid="link-auth-brand"><img src={`${basePath}/logo.svg`} alt="Aarogya" data-testid="img-auth-logo"/><span><b className="serif">Aarogya</b><small>WELLNESS, YOUR WAY</small></span></Link><p className="auth-aside-copy">A quieter place to notice the small things that help you feel more like yourself.</p>{mode==='sign-in'?<SignIn routing="path" path={`${basePath}/sign-in`} signUpUrl={`${basePath}/sign-up`}/>:<SignUp routing="path" path={`${basePath}/sign-up`} signInUrl={`${basePath}/sign-in`}/>}</div></div>;
+}
+function HomeRoute(){const {isLoaded,isSignedIn}=useAuth();if(!isLoaded)return <AppLoading/>;return isSignedIn?<Redirect to="/dashboard"/>:<WelcomePage/>;}
+function WelcomePage(){
+  return <div className="welcome-page"><header className="welcome-nav"><Link href="/" className="welcome-brand" data-testid="link-welcome-brand"><img src={`${basePath}/logo.svg`} alt="" data-testid="img-welcome-logo"/><span className="serif">Aarogya</span></Link><div className="flex gap-3"><Link href="/sign-in" className="btn btn-soft no-underline" data-testid="link-sign-in">Sign in</Link><Link href="/sign-up" className="btn btn-primary no-underline" data-testid="link-sign-up">Create account <ArrowRight size={15}/></Link></div></header><main><section className="welcome-hero"><div className="welcome-copy"><p className="eyebrow">A personal wellness journal</p><h1 className="serif">Care begins<br/>with <em>noticing.</em></h1><p>Make a little space for the meals, moods, routines and moments that make up your day. No scores to chase. Just your own story, held with care.</p><Link href="/sign-up" className="btn btn-primary no-underline" data-testid="button-welcome-start">Begin your space <ArrowRight size={16}/></Link><span className="welcome-note"><LockKeyhole size={14}/> Private to your account</span></div><div className="welcome-art" aria-label="Botanical illustration"><div className="art-disc"></div><div className="art-stem stem-one"></div><div className="art-stem stem-two"></div><div className="art-leaf leaf-one"></div><div className="art-leaf leaf-two"></div><div className="art-leaf leaf-three"></div><div className="art-leaf leaf-four"></div><div className="art-caption">A softer kind<br/>of progress</div></div></section><section className="welcome-values"><div><span>01 / NOTICE</span><h2 className="serif">Your day, in moments.</h2><p>Keep simple notes on nourishment, hydration and how you feel—without turning care into another checklist.</p></div><div><span>02 / MAKE ROOM</span><h2 className="serif">Gentle rhythms, chosen by you.</h2><p>Set intentions that fit your real life. Skip what doesn’t serve you, and return whenever you’re ready.</p></div><div><span>03 / REFLECT</span><h2 className="serif">Patterns without judgment.</h2><p>Look back at the things you chose to record. Your wellness is personal, and your perspective comes first.</p></div></section><section className="welcome-bottom"><p className="eyebrow">Aarogya · wellness, your way</p><h2 className="serif">Start wherever you are.</h2><Link href="/sign-up" className="btn btn-primary no-underline" data-testid="link-welcome-bottom">Create your private space <ArrowRight size={15}/></Link></section></main></div>;
+}
+function AppLoading(){return <div className="app-loading" role="status" data-testid="status-auth-loading"><div className="skeleton-bar"/><div className="skeleton-card"/></div>;}
+function ClerkCacheSync(){const {addListener}=useClerk();const client=useQueryClient();const previous=useRef<string|null|undefined>(undefined);useEffect(()=>addListener(({user})=>{const id=user?.id??null;if(previous.current!==undefined&&previous.current!==id)client.clear();previous.current=id;}),[addListener,client]);return null;}
+function ProtectedTracker(){const {isLoaded,isSignedIn}=useAuth();if(!isLoaded)return <AppLoading/>;return isSignedIn?<TrackerApp/>:<Redirect to="/"/>;}
+function TrackerApp() {
+  const {user}=useUser();const {isSignedIn}=useAuth();
+  const snapshot=useGetWellnessSnapshot({query:{enabled:isSignedIn,queryKey:getGetWellnessSnapshotQueryKey()}});
+  const save=useSaveWellnessSnapshot();const remove=useDeleteWellnessSnapshot();const client=useQueryClient();
+  const [data,setData]=useState<Store>(blank);const [hydrated,setHydrated]=useState(false);const [loadedOwner,setLoadedOwner]=useState<string|undefined>();const [importChoice,setImportChoice]=useState<'pending'|'dismissed'|'done'>('pending');
+  const [legacy,setLegacy]=useState<Store|null>(null);const [saveState,setSaveState]=useState('Saved to your account');const lastSaved=useRef('');
+  const userId=user?.id;
+  const currentOwner=useRef(userId);const staleSnapshotTime=useRef(0);
+  useEffect(()=>{if(currentOwner.current===userId)return;currentOwner.current=userId;staleSnapshotTime.current=snapshot.dataUpdatedAt;setHydrated(false);setLoadedOwner(undefined);setData(blank);setLegacy(null);setImportChoice('pending');lastSaved.current='';void snapshot.refetch();},[userId]);
+  useEffect(()=>{if(!snapshot.isSuccess||hydrated||snapshot.dataUpdatedAt<=staleSnapshotTime.current)return;const server=snapshot.data.payload;const parsed=server?parseStore(server):blank;setData(parsed);lastSaved.current=JSON.stringify(parsed);setHydrated(true);setLoadedOwner(userId);if(!server){setLegacy(readLegacyStore());}},[snapshot.data,snapshot.isSuccess,snapshot.dataUpdatedAt,hydrated,userId]);
+  const saveMutate=save.mutate;const invalidate=()=>client.invalidateQueries({queryKey:getGetWellnessSnapshotQueryKey()});
+  useEffect(()=>{if(!hydrated||loadedOwner!==userId||!snapshot.isSuccess)return;const serialized=JSON.stringify(data);if(serialized===lastSaved.current)return;setSaveState('Saving changes…');const timer=window.setTimeout(()=>{saveMutate({data:{payload:data}},{onSuccess:()=>{lastSaved.current=serialized;setSaveState('Saved to your account');void invalidate();},onError:()=>setSaveState('Could not save changes. Try again.')});},650);return()=>window.clearTimeout(timer);},[data,hydrated,loadedOwner,userId,snapshot.isSuccess,saveMutate,client]);
+  const updateData:React.Dispatch<React.SetStateAction<Store>>=setData;
+  const importLegacy=()=>{if(!legacy)return;lastSaved.current=JSON.stringify(legacy);setData(legacy);setImportChoice('done');setSaveState('Importing your browser entries…');saveMutate({data:{payload:legacy}},{onSuccess:()=>{localStorage.removeItem(KEY);setLegacy(null);lastSaved.current=JSON.stringify(legacy);setSaveState('Imported and saved to your account');void invalidate();},onError:()=>{lastSaved.current=JSON.stringify(blank);setImportChoice('pending');setSaveState('Import failed. Your browser copy is still available.');}});};
   const [path]=useLocation();
   const updateProfile=(patch:Partial<Profile>)=>setData(d=>({...d,profile:{...d.profile,...patch}}));
   return <div className="app-shell">
     <aside className="sidebar">
       <Link href="/" className="flex items-center gap-3 px-3 mb-12 no-underline text-inherit" data-testid="link-brand">
-        <span className="brand-mark"><Leaf size={19}/></span><span><b className="serif text-[19px] tracking-tight">Aarogya</b><small className="block text-[9px] tracking-[.18em] text-[#b5c8ba] uppercase">wellness, your way</small></span>
+        <img className="brand-logo" src={`${basePath}/logo.svg`} alt="" data-testid="img-app-logo"/><span><b className="serif text-[19px] tracking-tight">Aarogya</b><small className="block text-[9px] tracking-[.18em] text-[#b5c8ba] uppercase">wellness, your way</small></span>
       </Link>
       <p className="eyebrow text-[#a8bbae] px-3 mb-3">Your space</p>
       <nav className="flex flex-col gap-1">{navItems.map(({href,label,icon:Icon})=><Link href={href} key={href} className={`nav-link ${path===href?'active':''}`} data-testid={`link-nav-${label.toLowerCase()}`}><Icon size={17}/>{label}</Link>)}</nav>
       <div className="mt-auto rounded-2xl border border-[#52695d] bg-[#355448] p-4">
         <div className="flex items-center gap-2 text-[#e4c8a7] mb-2"><LockKeyhole size={15}/><span className="text-[11px] font-bold">Just for you</span></div>
-        <p className="text-[11px] leading-relaxed text-[#d1ddd4] m-0">Your entries stay in this browser. Nothing is sent to a server.</p>
+         <p className="text-[11px] leading-relaxed text-[#d1ddd4] m-0">Your private entries are saved to your Aarogya account.</p>
         <Link href="/settings" className="inline-flex items-center gap-1 mt-3 text-[11px] text-[#e4c8a7] no-underline" data-testid="link-privacy-sidebar">Privacy details <ArrowRight size={12}/></Link>
       </div>
     </aside>
     <main className="main-area">
       <header className="topbar">
-        <div className="flex items-center gap-2 text-sm text-[#6c8174]"><span className="w-2 h-2 rounded-full bg-[#83a887]"></span> A gentler way to notice</div>
-        <Link href="/settings" className="flex items-center gap-2 no-underline text-[#486354] text-sm" data-testid="link-settings-top"><span className="w-8 h-8 rounded-full bg-[#e5e9dc] grid place-items-center"><Settings2 size={16}/></span><span className="hide-mobile">Your space</span></Link>
+        <div className="flex items-center gap-2 text-sm text-[#6c8174]"><img className="topbar-logo" src={`${basePath}/logo.svg`} alt="" data-testid="img-topbar-logo"/><span className={`w-2 h-2 rounded-full ${saveState.startsWith('Could')?'bg-[#a85445]':'bg-[#83a887]'}`}></span><span role="status" data-testid="status-save">{snapshot.isLoading?'Loading your entries…':saveState}</span></div>
+        <div className="flex items-center gap-3"><span className="hide-mobile text-xs text-[#6c8174]" data-testid="text-account-name">{user?.fullName||user?.primaryEmailAddress?.emailAddress||'Your account'}</span><Link href="/settings" className="flex items-center gap-2 no-underline text-[#486354] text-sm" data-testid="link-settings-top"><span className="w-8 h-8 rounded-full bg-[#e5e9dc] grid place-items-center"><Settings2 size={16}/></span><span className="hide-mobile">Your space</span></Link><LogoutControl/></div>
       </header>
-      <Switch>
-        <Route path="/"><TodayPage data={data} setData={setData}/></Route>
+      {snapshot.isError&&<div className="api-error" role="alert" data-testid="error-snapshot">Your wellness entries could not be loaded. <button className="underline" onClick={()=>void snapshot.refetch()} data-testid="button-retry-snapshot">Try again</button></div>}
+      {legacy&&importChoice==='pending'&&<section className="legacy-banner" data-testid="panel-legacy-import"><div><b className="serif">Bring your earlier notes?</b><p>Your browser has an older Aarogya data copy. It will stay here unless you choose to import it into this account.</p></div><div className="flex gap-2"><button className="btn btn-primary" onClick={importLegacy} data-testid="button-import-legacy">Import browser data</button><button className="btn btn-soft" onClick={()=>{setImportChoice('dismissed');setLegacy(null);}} data-testid="button-dismiss-legacy">Not now</button><button className="btn btn-quiet" onClick={()=>{localStorage.removeItem(KEY);setLegacy(null);setImportChoice('dismissed');}} data-testid="button-remove-legacy">Remove old copy</button></div></section>}
+      {(!hydrated||loadedOwner!==userId)&&!snapshot.isError?<div className="page-wrap" data-testid="status-snapshot-loading"><div className="skeleton-card"/></div>:null}
+      {loadedOwner===userId&&<Switch>
+        <Route path="/dashboard"><TodayPage data={data} setData={updateData}/></Route>
         <Route path="/nutrition"><NutritionPage data={data} setData={setData}/></Route>
         <Route path="/wellbeing"><WellbeingPage data={data} setData={setData}/></Route>
         <Route path="/insights"><InsightsPage data={data} setData={setData}/></Route>
-        <Route path="/settings"><SettingsPage data={data} setData={setData} updateProfile={updateProfile}/></Route>
+        <Route path="/settings"><SettingsPage data={data} updateProfile={updateProfile} onDelete={()=>remove.mutate(undefined,{onSuccess:()=>{setData(blank);lastSaved.current=JSON.stringify(blank);setSaveState('Your account data was deleted');void invalidate();},onError:()=>setSaveState('Could not delete your data. Try again.')})}/></Route>
         <Route component={NotFound}/>
-      </Switch>
-      <nav className="mobile-nav">{navItems.map(({href,label,icon:Icon})=><Link href={href} key={href} className={path===href?'active':''} data-testid={`mobile-nav-${label.toLowerCase()}`}><Icon size={18}/>{label}</Link>)}</nav>
+      </Switch>}
+      {loadedOwner===userId&&<nav className="mobile-nav">{navItems.map(({href,label,icon:Icon})=><Link href={href} key={href} className={path===href?'active':''} data-testid={`mobile-nav-${label.toLowerCase()}`}><Icon size={18}/>{label}</Link>)}</nav>}
     </main>
   </div>;
 }
+function LogoutControl(){const {signOut}=useClerk();return <button type="button" className="logout-control" onClick={()=>signOut({redirectUrl:basePath||'/'})} data-testid="button-logout"><LogOut size={15}/><span className="hide-mobile">Log out</span></button>;}
 function PageTitle({eyebrow,title,subtitle,action}:{eyebrow:string;title:string;subtitle?:string;action?:React.ReactNode}) {
   return <div className="flex flex-wrap justify-between items-end gap-4 mb-8 fade-in"><div><p className="eyebrow mb-2">{eyebrow}</p><h1 className="serif text-[clamp(34px,5vw,49px)] leading-[1.04] m-0 text-[#29463d]">{title}</h1>{subtitle&&<p className="text-sm text-[#728278] mt-3 mb-0 max-w-[570px] leading-relaxed">{subtitle}</p>}</div>{action}</div>;
 }
@@ -100,7 +175,7 @@ function TodayPage({data,setData}:{data:Store;setData:React.Dispatch<React.SetSt
     </div>
     <div className="grid grid-mobile grid-cols-2 gap-5 mt-5">
       <Panel className="panel-pad"><div className="flex items-center gap-2 mb-4"><span className="w-8 h-8 rounded-full bg-[#f3e9dc] grid place-items-center text-[#a8754d]"><Wind size={16}/></span><div><p className="eyebrow mb-0">Pause & notice</p><h3 className="serif text-xl m-0 text-[#355748]">How are you feeling?</h3></div></div>{checkin?<p className="text-sm text-[#617368]" data-testid="text-checkin-summary">You noted feeling <b>{checkin.mood.join(', ')||'present'}</b>. Thank you for checking in.</p>:<><p className="small-copy mb-4">No need to explain it all. A few words are enough.</p><button onClick={()=>setShowCheckin(v=>!v)} className="btn btn-soft" data-testid="button-open-checkin">{showCheckin?'Close check-in':'Take a moment'} <ArrowRight size={14}/></button>{showCheckin&&<QuickCheckin setData={setData}/>}</>}</Panel>
-      <Panel className="panel-pad"><div className="flex items-center gap-2 mb-3"><span className="w-8 h-8 rounded-full bg-[#e5ece7] grid place-items-center text-[#537762]"><ShieldCheck size={16}/></span><div><p className="eyebrow mb-0">A note on privacy</p><h3 className="serif text-xl m-0 text-[#355748]">Your data stays close.</h3></div></div><p className="small-copy mb-4">This release saves everything in this browser only. No account, server, or outside analysis.</p><Link href="/settings" className="inline-flex items-center gap-2 text-sm font-bold text-[#496b59] no-underline" data-testid="link-settings-privacy">Privacy & data settings <ArrowRight size={14}/></Link></Panel>
+      <Panel className="panel-pad"><div className="flex items-center gap-2 mb-3"><span className="w-8 h-8 rounded-full bg-[#e5ece7] grid place-items-center text-[#537762]"><ShieldCheck size={16}/></span><div><p className="eyebrow mb-0">A note on privacy</p><h3 className="serif text-xl m-0 text-[#355748]">Your data stays close.</h3></div></div><p className="small-copy mb-4">Your private wellness snapshot belongs to your account and is available only after you sign in.</p><Link href="/settings" className="inline-flex items-center gap-2 text-sm font-bold text-[#496b59] no-underline" data-testid="link-settings-privacy">Privacy & data settings <ArrowRight size={14}/></Link></Panel>
     </div>
   </div>;
 }
@@ -195,12 +270,12 @@ function InsightsPage({data,setData}:{data:Store;setData:React.Dispatch<React.Se
   </div>;
 }
 function TrendStat({number,label}:{number:string;label:string}){return <div className="p-3 rounded-xl bg-[#f2f2e9]"><div className="metric-number">{number}</div><span className="text-[10px] text-[#78877d]">{label}</span></div>}
-function SettingsPage({data,setData,updateProfile}:{data:Store;setData:React.Dispatch<React.SetStateAction<Store>>;updateProfile:(p:Partial<Profile>)=>void}) {
+function SettingsPage({data,updateProfile,onDelete}:{data:Store;updateProfile:(p:Partial<Profile>)=>void;onDelete:()=>void}) {
   const p=data.profile;const [message,setMessage]=useState('');
   const ready=Number(p.age)>=18&&Number(p.age)<=120&&Number(p.height)>0&&Number(p.weight)>0&&Boolean(p.calculation);
   const estimate=useMemo(()=>{if(!ready)return null;const age=Number(p.age),kg=Number(p.weight),cm=Number(p.height);return Math.round(p.calculation==='female'?10*kg+6.25*cm-5*age-161:10*kg+6.25*cm-5*age+5);},[ready,p.age,p.height,p.weight,p.calculation]);
   const exportData=()=>{const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='aarogya-wellness-data.json';a.click();URL.revokeObjectURL(url);setMessage('Your data file has been prepared.');};
-  const clearData=()=>{if(window.confirm('Clear all information saved in this browser? This cannot be undone.')){localStorage.removeItem(KEY);setData(blank);setMessage('Your local data has been cleared.');}};
+  const clearData=()=>{if(window.confirm('Delete all wellness information saved to your Aarogya account? This cannot be undone.')){onDelete();setMessage('Your account data is being deleted.');}};
   const update=(key:keyof Profile,value:string|boolean)=>updateProfile({[key]:value} as Partial<Profile>);
   return <div className="page-wrap"><PageTitle eyebrow="Your space, your choices" title="Settings & privacy." subtitle="This tracker is personal by design. Keep only the details that help you."/>
     <div className="grid grid-mobile grid-cols-[1.1fr_.9fr] gap-5">
@@ -219,7 +294,7 @@ function SettingsPage({data,setData,updateProfile}:{data:Store;setData:React.Dis
           {!ready?<p className="text-sm text-[#687d70] leading-relaxed mt-4">A calorie estimate is unavailable until you’re 18 or older and enter age, height, weight, and an optional calculation profile. It’s completely fine to leave this blank.</p>:<><p className="small-copy mt-4">Mifflin–St Jeor is used for an approximate resting energy estimate. It is not a calorie target or medical advice.</p><label className="flex gap-2 items-start text-xs text-[#526d5e] mt-3"><input type="checkbox" checked={p.estimateConfirmed} onChange={e=>update('estimateConfirmed',e.target.checked)} className="accent-[#527961] mt-0.5" data-testid="checkbox-confirm-estimate"/> I understand this is a rough resting estimate, not a prescription. Show it to me.</label>{p.estimateConfirmed&&<><div className="metric-number my-3" data-testid="text-energy-estimate">{estimate} <span className="text-sm font-sans">kcal/day at rest</span></div><p className="small-copy">Resting energy is not your daily calorie need. Activity and individual needs vary. No deficit goal is set here. Food targets should be discussed with a qualified clinician if you need one.</p></>}</>}
           {Number(p.age)>0&&Number(p.age)<18&&<p className="text-xs text-[#936148] mt-4" data-testid="notice-no-calorie-estimate">Calorie estimates are not shown for people under 18. Growing bodies need individualized support.</p>}
         </Panel>
-        <Panel className="panel-pad"><p className="eyebrow mb-1">Privacy & control</p><h2 className="serif text-2xl m-0 text-[#355748]">Your browser, your data.</h2><div className="flex gap-3 mt-4 p-3 rounded-xl bg-[#f1f2eb]"><LockKeyhole size={17} className="text-[#56745f] shrink-0 mt-0.5"/><p className="small-copy m-0 text-[#5e7365]">Entries are stored only in this browser’s local storage. Clearing browser data will remove them. No server, account, AI analysis, or external sharing is used.</p></div><div className="mt-4 space-y-2 text-xs text-[#66786c]"><p className="flex gap-2 m-0"><Check size={14} className="text-[#63866d]"/> Data export is available as a JSON file.</p><p className="flex gap-2 m-0"><Check size={14} className="text-[#63866d]"/> Web-only reminders and device syncing are not enabled in this release.</p><p className="flex gap-2 m-0"><Check size={14} className="text-[#63866d]"/> No photo analysis, barcode scanning, or social sharing is enabled.</p></div><div className="flex flex-wrap gap-2 mt-5"><button className="btn btn-soft" onClick={exportData} data-testid="button-export-data"><Download size={15}/> Export my data</button><button className="btn btn-danger" onClick={clearData} data-testid="button-clear-data"><Trash2 size={15}/> Clear all data</button></div>{message&&<p role="status" className="text-xs text-[#56745f] mt-3" data-testid="status-settings">{message}</p>}</Panel>
+        <Panel className="panel-pad"><p className="eyebrow mb-1">Privacy & control</p><h2 className="serif text-2xl m-0 text-[#355748]">Your account, your data.</h2><div className="flex gap-3 mt-4 p-3 rounded-xl bg-[#f1f2eb]"><LockKeyhole size={17} className="text-[#56745f] shrink-0 mt-0.5"/><p className="small-copy m-0 text-[#5e7365]">Your wellness snapshot is saved to your signed-in Aarogya account. It is loaded only after authentication, and you can export or permanently delete it here.</p></div><div className="mt-4 space-y-2 text-xs text-[#66786c]"><p className="flex gap-2 m-0"><Check size={14} className="text-[#63866d]"/> Data export is available as a JSON file.</p><p className="flex gap-2 m-0"><Check size={14} className="text-[#63866d]"/> Your data is not used for predictions or medical advice.</p><p className="flex gap-2 m-0"><Check size={14} className="text-[#63866d]"/> You can remove the account snapshot at any time.</p></div><div className="flex flex-wrap gap-2 mt-5"><button className="btn btn-soft" onClick={exportData} data-testid="button-export-data"><Download size={15}/> Export my data</button><button className="btn btn-danger" onClick={clearData} data-testid="button-clear-data"><Trash2 size={15}/> Delete account data</button></div>{message&&<p role="status" className="text-xs text-[#56745f] mt-3" data-testid="status-settings">{message}</p>}</Panel>
       </div>
     </div>
     <p className="small-copy text-center mt-7">Aarogya is a personal reflection tool, not medical care.</p>

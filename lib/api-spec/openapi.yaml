@@ -10,6 +10,8 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: wellness
+    description: Private wellness data for the signed-in user
 paths:
   /healthz:
     get:
@@ -24,6 +26,50 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /wellness/snapshot:
+    get:
+      operationId: getWellnessSnapshot
+      tags: [wellness]
+      summary: Get the signed-in user's wellness data
+      responses:
+        "200":
+          description: Current private wellness snapshot, or null before first save
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WellnessSnapshotResponse"
+        "401":
+          description: Authentication required
+    put:
+      operationId: saveWellnessSnapshot
+      tags: [wellness]
+      summary: Save the signed-in user's wellness data
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WellnessSnapshotInput"
+      responses:
+        "200":
+          description: Saved wellness snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WellnessSnapshotResponse"
+        "400":
+          description: Invalid snapshot
+        "401":
+          description: Authentication required
+    delete:
+      operationId: deleteWellnessSnapshot
+      tags: [wellness]
+      summary: Delete the signed-in user's wellness data
+      responses:
+        "204":
+          description: Snapshot deleted
+        "401":
+          description: Authentication required
 components:
   schemas:
     HealthStatus:
@@ -33,4 +79,24 @@ components:
           type: string
       required:
         - status
+    WellnessSnapshotInput:
+      type: object
+      properties:
+        payload:
+          type: object
+          additionalProperties: true
+      required:
+        - payload
+    WellnessSnapshotResponse:
+      type: object
+      properties:
+        payload:
+          type: ["object", "null"]
+          additionalProperties: true
+        updatedAt:
+          type: ["string", "null"]
+          format: date-time
+      required:
+        - payload
+        - updatedAt
 
