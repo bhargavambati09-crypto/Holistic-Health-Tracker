@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "Holistic Health Tracker"
+description = "A personal wellness web app for setting flexible health goals, logging meals and hydration, tracking mood and recovery, and reviewing private progress insights."
+version = "1.0.0"
+id = "artifacts/holistic-health-tracker"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 23154
+
+[services.development]
+run = "pnpm --filter @workspace/holistic-health-tracker run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/holistic-health-tracker", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/holistic-health-tracker/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "23154"
+BASE_PATH = "/"

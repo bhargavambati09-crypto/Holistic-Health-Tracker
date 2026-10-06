@@ -1,0 +1,31 @@
+Act as a Principal Software Architect and Senior UI/UX Engineer. Design a comprehensive system architecture and feature specification document for a "Custom Holistic Health Tracker." 
+
+The system must dynamically assign goals, guide dietary choices, and monitor general health. Structure the design into five distinct core modules with the precise specifications outlined below:
+
+1. GOAL ASSIGNMENT & ONBOARDING MODULE
+- Requirements: Define a logic flow for a user onboarding questionnaire collecting age, height, weight, gender, chronotype (sleep pattern), medical conditions, menstrual cycle tracking (optional toggle), and primary objective (Fat Loss, Muscle Gain, Maintenance).
+- Core Feature: Detail a dynamic formula for Daily Caloric Targets and Macronutrient Distribution tailored to the objective and modified dynamically by hormonal cycle phases or recovery states.
+- Behavioral Feature: Outline an algorithm that breaks long-term milestones into automated, weekly micro-goals.
+
+2. SMART DIET & NUTRITION GUIDE
+- Core Feature: Specify an AI-assisted Photo Meal Logging feature flow alongside a Barcode Scanning tool using open-source food database APIs.
+- Behavioral Feature: Detail a "Satiety & Symptom Logger" that prompts users 1 hour post-meal to rate fullness (1-5) and select physical symptoms (e.g., Bloating, Energy Crash).
+- Hydration Feature: Design a smart water tracker system that sends progressive notification triggers based on local time and active calorie burn.
+
+3. GENERAL HEALTH & WEARABLE INTEGRATION LAYER
+- Wearable Syncing: Define data ingestion pipelines for Apple HealthKit and Google Health Connect to auto-sync steps, sleep duration, and Heart Rate Variability (HRV).
+- Mental Well-being & Circadian Alignment: Log daily mood tags, perceived stress, and cross-reference them with the user's targeted chronotype windows.
+- Medical Biometrics: Log medication adherence, daily blood pressure, and fasting blood glucose trends.
+
+4. RECOVERY & SOCIAL ACCOUNTABILITY
+- Recovery Auto-Regulator: Detail a system logic that lowers daily step/calorie burn goals if a user logs an injury, muscle fatigue, or low wearable-synced HRV metrics.
+- Social Circles: Detail a privacy-first micro-community feature for sharing goal streaks and participating in shared group step challenges.
+
+5. BEHAVIORAL MECHANICS & DATA INSIGHTS
+- Gamification: Design a "Check-off" Streak Calendar system to visually reward consecutive days where core micro-goals are met.
+- Cross-Data Analytics: Outline a behavioral insight engine that correlates disparate data points (e.g., correlating <6 hours of sleep or a specific phase of the menstrual cycle with a spike in next-day sugar cravings).
+
+Deliver the response using clear Markdown headers. For each module, provide:
+- A brief functional overview.
+- A technical database schema suggestion (in markdown tables, detailing fields and data types).
+- A step-by-step UI/UX user flow describing how the user interacts with that specific feature.
